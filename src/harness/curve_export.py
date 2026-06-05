@@ -37,7 +37,7 @@ def export_training_curve(out_root: str, instance: str, method: str, seed: int, 
         "episode","method","instance","seed","episode_reward","episode_cost","total_reward","total_cost",
         "moving_avg_reward_10","moving_avg_reward_50","moving_avg_cost_10","moving_avg_cost_50","epsilon",
         "loss_mean","loss_last","steps","episode_length_decisions","termination_reason","minimum_bus_battery",
-        "battery_safety_violation_count","onboard_passenger_delay","parcel_lateness","late_delivery_count","runtime_sec","smoke",
+        "battery_safety_violation_count","onboard_passenger_delay_passenger_min","parcel_lateness_parcel_min","late_delivery_count","runtime_sec","smoke",
     ]
     for c in required:
         if c not in df.columns:
@@ -78,7 +78,7 @@ def export_eval_curves(out_root: str, instance: str, method: str, seed: int, row
     eval_path = curve_dir / f"{method}_seed_{seed}_eval_curve.csv"
     cum_path = curve_dir / f"{method}_seed_{seed}_eval_cumulative_curve.csv"
     df = pd.DataFrame(rows)
-    required = ["eval_episode","method","instance","seed","total_reward","total_cost","onboard_passenger_delay","total_bus_operating_delay","parcel_lateness","late_delivery_count","undelivered_parcel_count","minimum_bus_battery","battery_safety_violation_count","total_energy_consumption","average_charging_duration","valid_charging_opportunity_count","charger_utilization","station_power_overload_amount","station_power_overload_duration","locker_overflow_amount","locker_overflow_duration","termination_reason","full_horizon_completed","runtime_sec","smoke"]
+    required = ["eval_episode","method","instance","seed","total_reward","total_cost","onboard_passenger_delay_passenger_min","total_bus_operating_delay_min","parcel_lateness_parcel_min","late_delivery_count","undelivered_parcel_count","minimum_bus_battery","battery_safety_violation_count","total_energy_consumption","average_charging_duration_min","average_positive_charging_duration_min","total_charging_duration_min","mean_requested_charging_duration_min","mean_executed_charging_duration_min","mean_requested_action_index","mean_executed_action_index","valid_charging_opportunity_count","charger_utilization","station_power_overload_amount","station_power_overload_duration","locker_overflow_amount","locker_overflow_duration","termination_reason","full_horizon_completed","runtime_sec","smoke"]
     for c in required:
         if c not in df.columns:
             df[c] = math.nan
@@ -89,8 +89,8 @@ def export_eval_curves(out_root: str, instance: str, method: str, seed: int, row
         s = pd.to_numeric(df[col], errors="coerce")
         cdf[out] = s.expanding(min_periods=1).mean()
         cdf[out.replace("mean", "std")] = s.expanding(min_periods=1).std(ddof=0)
-    cdf["cumulative_mean_passenger_delay"] = pd.to_numeric(df["onboard_passenger_delay"], errors="coerce").expanding(min_periods=1).mean()
-    cdf["cumulative_mean_parcel_lateness"] = pd.to_numeric(df["parcel_lateness"], errors="coerce").expanding(min_periods=1).mean()
+    cdf["cumulative_mean_passenger_delay"] = pd.to_numeric(df["onboard_passenger_delay_passenger_min"], errors="coerce").expanding(min_periods=1).mean()
+    cdf["cumulative_mean_parcel_lateness"] = pd.to_numeric(df["parcel_lateness_parcel_min"], errors="coerce").expanding(min_periods=1).mean()
     cdf["cumulative_mean_minimum_bus_battery"] = pd.to_numeric(df["minimum_bus_battery"], errors="coerce").expanding(min_periods=1).mean()
     fh = pd.to_numeric(df["full_horizon_completed"], errors="coerce").fillna(0.0)
     cdf["cumulative_success_rate_full_horizon"] = fh.expanding(min_periods=1).mean()
@@ -115,7 +115,7 @@ def _plot_eval(df, cdf, out_root, instance, method, seed):
     _plot(f"{method}_seed_{seed}_eval_total_cost_curve.png", [("total_cost", df["total_cost"])], f"Evaluation Total Cost ({method})", "Total cost")
     _plot(f"{method}_seed_{seed}_eval_cumulative_mean_cost_curve.png", [("cumulative_mean_total_cost", cdf["cumulative_mean_total_cost"])], f"Evaluation Cumulative Mean Cost ({method})", "Cumulative mean cost")
     _plot(f"{method}_seed_{seed}_eval_reward_curve.png", [("total_reward", df["total_reward"])], f"Evaluation Reward ({method})", "Total reward")
-    _plot(f"{method}_seed_{seed}_eval_service_quality_curve.png", [("parcel_lateness", df["parcel_lateness"]), ("late_delivery_count", df["late_delivery_count"])], f"Evaluation Service Quality ({method})", "Service quality")
+    _plot(f"{method}_seed_{seed}_eval_service_quality_curve.png", [("parcel_lateness", df["parcel_lateness_parcel_min"]), ("late_delivery_count", df["late_delivery_count"])], f"Evaluation Service Quality ({method})", "Service quality")
     _plot(f"{method}_seed_{seed}_eval_battery_safety_curve.png", [("minimum_bus_battery", df["minimum_bus_battery"]), ("battery_safety_violation_count", df["battery_safety_violation_count"])], f"Evaluation Battery Safety ({method})", "Battery/Safety")
 
 

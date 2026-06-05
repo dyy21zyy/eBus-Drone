@@ -92,7 +92,7 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
     (out / "configs").mkdir(parents=True, exist_ok=True)
     (out / "done").mkdir(parents=True, exist_ok=True)
     csv_path = out / "metrics" / f"train_log_{method}_{instance_name}_seed_{seed}.csv"
-    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "episode_cost", "total_reward", "total_cost", "moving_avg_reward_10", "moving_avg_reward_50", "moving_avg_cost_10", "moving_avg_cost_50", "onboard_passenger_delay", "parcel_lateness", "late_delivery_count", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "loss_mean", "loss_last", "runtime_sec", "termination_reason", "steps", "episode_length_decisions", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "buffer_len", "buffer_total_added", "paper_ready_episode"]
+    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "episode_cost", "total_reward", "total_cost", "moving_avg_reward_10", "moving_avg_reward_50", "moving_avg_cost_10", "moving_avg_cost_50", "onboard_passenger_delay_passenger_min", "average_excess_dwell_time_min", "total_bus_operating_delay_min", "parcel_lateness_parcel_min", "late_delivery_count", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "average_charging_duration_min", "average_positive_charging_duration_min", "total_charging_duration_min", "mean_requested_charging_duration_min", "mean_executed_charging_duration_min", "mean_requested_action_index", "mean_executed_action_index", "epsilon", "loss", "loss_mean", "loss_last", "runtime_sec", "termination_reason", "steps", "episode_length_decisions", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "buffer_len", "buffer_total_added", "paper_ready_episode"]
     start_ep = 0
     best_metric = None
     if resume:
@@ -216,8 +216,10 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             "moving_avg_reward_50": sum(float(r.get("episode_reward", float("nan"))) for r in last50)/len(last50),
             "moving_avg_cost_10": sum(float(r.get("episode_cost", float("nan"))) for r in last10)/len(last10),
             "moving_avg_cost_50": sum(float(r.get("episode_cost", float("nan"))) for r in last50)/len(last50),
-            "onboard_passenger_delay": float(episode_metrics.get("onboard_passenger_delay", 0.0)),
-            "parcel_lateness": float(episode_metrics.get("parcel_lateness", 0.0)),
+            "onboard_passenger_delay_passenger_min": float(episode_metrics.get("onboard_passenger_delay_passenger_min", episode_metrics.get("onboard_passenger_delay", 0.0))),
+            "average_excess_dwell_time_min": float(episode_metrics.get("average_excess_dwell_time_min", episode_metrics.get("average_excess_dwell_time", 0.0))),
+            "total_bus_operating_delay_min": float(episode_metrics.get("total_bus_operating_delay_min", episode_metrics.get("total_bus_operating_delay", 0.0))),
+            "parcel_lateness_parcel_min": float(episode_metrics.get("parcel_lateness_parcel_min", episode_metrics.get("parcel_lateness", 0.0))),
             "late_delivery_count": float(episode_metrics.get("late_delivery_count", 0.0)),
             "undelivered_parcel_count": float(episode_metrics.get("undelivered_parcel_count", 0.0)),
             "minimum_bus_battery": float(episode_metrics.get("minimum_bus_battery", env.state.get("battery", 0.0))) if hasattr(env, "state") else 0.0,
@@ -225,8 +227,13 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             "total_energy_consumption": float(episode_metrics.get("total_energy_consumption", 0.0)),
             "station_power_overload_amount": float(episode_metrics.get("station_power_overload_amount", 0.0)),
             "locker_overflow_amount": float(episode_metrics.get("locker_overflow_amount", 0.0)),
-            "mean_requested_action": (action_sum / dec) if dec else "",
-            "mean_executed_action": (action_sum / dec) if dec else "",
+            "average_charging_duration_min": float(episode_metrics.get("average_charging_duration_min", 0.0)),
+            "average_positive_charging_duration_min": float(episode_metrics.get("average_positive_charging_duration_min", 0.0)),
+            "total_charging_duration_min": float(episode_metrics.get("total_charging_duration_min", 0.0)),
+            "mean_requested_charging_duration_min": float(episode_metrics.get("mean_requested_charging_duration_min", 0.0)),
+            "mean_executed_charging_duration_min": float(episode_metrics.get("mean_executed_charging_duration_min", 0.0)),
+            "mean_requested_action_index": float(episode_metrics.get("mean_requested_action_index", (action_sum / dec) if dec else 0.0)),
+            "mean_executed_action_index": float(episode_metrics.get("mean_executed_action_index", (action_sum / dec) if dec else 0.0)),
             "epsilon": float(agent._eps()),
             "loss": loss_mean,
             "loss_mean": loss_mean,

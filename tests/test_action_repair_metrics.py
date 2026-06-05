@@ -77,8 +77,8 @@ def test_summary_csv_contains_action_repair_statistics(tmp_path):
         'invalid_action_count',
         'action_repair_count',
         'action_repair_rate',
-        'mean_requested_action',
-        'mean_executed_action',
+        'mean_requested_action_index',
+        'mean_executed_action_index',
         'mean_action_gap_after_repair',
     ]:
         assert key in header

@@ -187,8 +187,8 @@ def _run_eval(cfg, instance, seed, method, args, rows):
         return mean
     mtc = _mean_std("total_cost", "total_cost")
     _mean_std("total_reward", "total_reward")
-    _mean_std("onboard_passenger_delay", "onboard_passenger_delay")
-    _mean_std("parcel_lateness", "parcel_lateness")
+    _mean_std("onboard_passenger_delay_passenger_min", "onboard_passenger_delay_passenger_min")
+    _mean_std("parcel_lateness_parcel_min", "parcel_lateness_parcel_min")
     mmb = _mean_std("minimum_bus_battery", "minimum_bus_battery")
     _mean_std("total_energy_consumption", "total_energy_consumption")
     m["success_rate"] = sum(1.0 for r in per_ep if str(r.get("termination_reason", "")) == "horizon_reached") / len(per_ep)
@@ -482,9 +482,14 @@ def main():
         for i in plan['instances']:
             for seed in plan['seeds']:
                 _run_eval(cfg, i, seed, plan['methods'][0], args, rows)
-        out_method = plan['methods'][0]
+        raw_method = plan['methods'][0]
+        out_method = normalize_method_name(raw_method)
         out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{out_method}_{plan['instances'][0]}_seed_{plan['seeds'][0]}.csv"
-        save_eval_metrics(rows, str(out)); print(json.dumps(rows)); return
+        save_eval_metrics(rows, str(out))
+        if str(raw_method).startswith("uniform_") and str(raw_method) != out_method:
+            legacy_out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{raw_method}_{plan['instances'][0]}_seed_{plan['seeds'][0]}.csv"
+            save_eval_metrics(rows, str(legacy_out))
+        print(json.dumps(rows)); return
     if args.mode == 'validate_pipeline':
         _run_smoke_validation(cfg, args)
         return

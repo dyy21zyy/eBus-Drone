@@ -66,6 +66,18 @@ def validate_episode_result(result: dict[str, Any], *, allow_debug_truncation: b
             f"(got {full_horizon_completed}, expected {expected_full_horizon})"
         )
 
+    nonnegative_substrings = ("cost", "delay", "lateness", "duration", "holding_time", "overflow", "stockout")
+    for key, raw in result.items():
+        if not any(token in key for token in nonnegative_substrings):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            errors.append(f"{key} must be numeric, got {raw!r}")
+            continue
+        if value < -tolerance:
+            errors.append(f"{key} must be nonnegative physical metric, got {raw}")
+
     for key in ["undelivered_parcel_count", "terminal_undelivered_penalty", "late_delivery_count"]:
         if key in result:
             try:

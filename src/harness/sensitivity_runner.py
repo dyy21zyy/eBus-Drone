@@ -97,7 +97,7 @@ def run_sensitivity(methods, out_csv:str, env_builder, instance_name:str, test_s
                 grouped[f'{m}:{v}']=aggregate(sub)
     Path(out_csv).with_suffix('.json').write_text(json.dumps({'aggregated':grouped}, indent=2), encoding='utf-8')
     related = {
-        "passenger_intensity": "onboard_passenger_delay",
+        "passenger_intensity": "onboard_passenger_delay_passenger_min",
         "station_power_capacity": "station_power_overload_amount",
         "chargers_per_station": "charger_utilization",
     }.get(factor)
