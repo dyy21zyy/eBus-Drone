@@ -48,9 +48,9 @@ def test_paper_cli_smoke_train_eval_benchmark(temp_config):
         subprocess.run(cmd, check=True)
 
     metrics_dir = output_dir / 'metrics'
-    benchmark_dir = output_dir / 'benchmark'
+    benchmark_dir = output_dir / 'results' / 'benchmark' / 'small'
 
-    assert any(metrics_dir.glob('train_am_dueling_ddqn_dr_small_seed_1.csv'))
+    assert any(metrics_dir.glob('train_log_am_dueling_ddqn_dr_small_seed_1.csv'))
     assert any(metrics_dir.glob('eval_am_dueling_ddqn_dr_small_seed_1.csv'))
     summary_files = list(benchmark_dir.glob('summary*.csv'))
     assert summary_files, 'benchmark summary should not be empty'

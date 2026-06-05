@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from src.utils.metrics import REQUIRED_PAPER_METRICS, init_metrics, finalize_metrics
+from src.utils.metrics import REQUIRED_PAPER_METRICS, init_metrics, finalize_metrics, add_legacy_metric_aliases, LEGACY_METRIC_ALIASES
 from src.harness.result_validation import validate_episode_result
 
 def _required_component(rc: dict, key: str) -> float:
@@ -66,8 +66,8 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
                 continue
             metrics['total_reward'] += reward
             metrics['total_cost'] += _required_component(rc, 'total_cost')
-            metrics['onboard_passenger_delay'] += _required_component(rc, 'passenger_delay')
-            metrics['parcel_lateness'] += _required_component(rc, 'parcel_lateness')
+            metrics['onboard_passenger_delay_passenger_min'] += max(0.0, _required_component(rc, 'passenger_delay'))
+            metrics['parcel_lateness_parcel_min'] += max(0.0, _required_component(rc, 'parcel_lateness'))
             metrics['terminal_undelivered_penalty'] += _required_component(rc, 'terminal_penalty')
             metrics['total_energy_consumption'] += _required_component(rc, 'total_energy_kwh')
             metrics['station_power_overload_amount'] += _required_component(rc, 'power_overload')
@@ -83,15 +83,23 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
                     max(0.0, float(dwell.get('realized_dwell_min', 0.0)) - float(dwell.get('passenger_dwell_min', 0.0))),
                 )
             )
-            metrics['average_excess_dwell_time'] += extra_dwell
-            metrics['total_bus_operating_delay'] += float(info.get('bus_operating_delay_delta', extra_dwell))
+            metrics['average_excess_dwell_time_min'] += max(0.0, extra_dwell)
+            metrics['total_bus_operating_delay_min'] += max(0.0, float(info.get('bus_operating_delay_delta', extra_dwell)))
             metrics['steps'] += 1
             metrics['repaired_actions'] += int(info.get('action_repaired', False))
             metrics['invalid_action_count'] += float(info.get('invalid_action', False))
             metrics['action_repair_count'] += float(info.get('was_action_repaired', info.get('action_repaired', False)))
-            metrics['requested_action_sum'] += float(info.get('requested_action', action))
-            metrics['executed_action_sum'] += float(info.get('executed_action', action))
+            metrics['requested_action_index_sum'] += float(info.get('requested_action', action))
+            metrics['executed_action_index_sum'] += float(info.get('executed_action', action))
             metrics['action_gap_sum'] += abs(float(info.get('requested_action', action)) - float(info.get('executed_action', action)))
+            metrics['requested_charging_duration_min_sum'] += max(0.0, float(info.get('requested_duration_min', info.get('executed_duration_min', 0.0))))
+            executed_duration_min = max(0.0, float(info.get('executed_duration_min', 0.0)))
+            metrics['executed_charging_duration_min_sum'] += executed_duration_min
+            if executed_duration_min > 0.0:
+                metrics['charging_event_count'] += 1.0
+                metrics['positive_executed_charging_duration_min_sum'] += executed_duration_min
+            else:
+                metrics['zero_charging_event_count'] += 1.0
             min_bat = min(min_bat, float(env.state.get('battery', 0)))
             if terminated or truncated:
                 terminated_by_env = bool(terminated)
@@ -107,10 +115,10 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
         if p.get('delivery_completion_time_min') is not None
         and float(p.get('delivery_completion_time_min')) <= end_time + 1e-9
     ]
-    locker_holding_times = [float(p['locker_holding_time_min']) for p in delivered_parcels if p.get('locker_holding_time_min') is not None]
-    metrics['average_locker_holding_time'] = float(sum(locker_holding_times)) / float(len(locker_holding_times)) if locker_holding_times else 0.0
-    if metrics['total_bus_operating_delay'] <= 0.0:
-        metrics['total_bus_operating_delay'] = float(sum(b.get('accumulated_operating_delay_min', 0.0) for b in getattr(env, 'bus_states', {}).values()))
+    locker_holding_times = [max(0.0, float(p['locker_holding_time_min'])) for p in delivered_parcels if p.get('locker_holding_time_min') is not None]
+    metrics['average_locker_holding_time_min'] = float(sum(locker_holding_times)) / float(len(locker_holding_times)) if locker_holding_times else 0.0
+    if metrics['total_bus_operating_delay_min'] <= 0.0:
+        metrics['total_bus_operating_delay_min'] = max(0.0, float(sum(b.get('accumulated_operating_delay_min', 0.0) for b in getattr(env, 'bus_states', {}).values())))
     stations = list(getattr(env, 'station_states', {}).values())
     occupied_time = sum(float(st.get('charger_occupied_time_min', 0.0)) for st in stations)
     charger_capacity_time = sum(float(max(0, int(st.get('charging_slots', len(st.get('charger_release_times_min', [])) or 0)))) * float(getattr(env, 'horizon', getattr(env, 'state', {}).get('horizon', 0.0))) for st in stations)
@@ -119,7 +127,7 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     metrics['drone_battery_stockout_count'] = float(sum(float(st.get('dispatch_stockout_count', 0.0)) for st in stations))
 
     env_episode_metrics = env.get_episode_metrics() if hasattr(env, 'get_episode_metrics') else {}
-    for k in ['total_cost','total_reward','onboard_passenger_delay','total_bus_operating_delay','parcel_lateness','late_delivery_count','undelivered_parcel_count','terminal_undelivered_penalty','minimum_bus_battery','battery_safety_violation_count','total_energy_consumption','station_power_overload_amount','locker_overflow_amount','invalid_action_count']:
+    for k in ['total_cost','total_reward','onboard_passenger_delay_passenger_min','average_excess_dwell_time_min','total_bus_operating_delay_min','parcel_lateness_parcel_min','late_delivery_count','undelivered_parcel_count','terminal_undelivered_penalty','minimum_bus_battery','battery_safety_violation_count','total_energy_consumption','station_power_overload_amount','locker_overflow_amount','station_power_overload_duration','locker_overflow_duration','average_charging_duration_min','average_positive_charging_duration_min','total_charging_duration_min','mean_requested_charging_duration_min','mean_executed_charging_duration_min','mean_requested_action_index','mean_executed_action_index','charging_event_count','zero_charging_event_count','invalid_action_count']:
         if k in env_episode_metrics:
             metrics[k] = float(env_episode_metrics[k])
     out = finalize_metrics(metrics)
@@ -130,9 +138,18 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     out['truncated_by_max_steps'] = bool(truncated_by_max_steps)
     out['full_horizon_completed'] = bool(terminated_by_env and out['termination_reason'] == 'horizon_reached' and not truncated_by_max_steps)
     out['operating_horizon'] = out['operating_horizon_min']
-    out['average_charging_duration'] = float(env_episode_metrics.get('average_charging_duration', 0.0))
+    out['average_charging_duration_min'] = float(env_episode_metrics.get('average_charging_duration_min', out.get('average_charging_duration_min', 0.0)))
+    out['average_positive_charging_duration_min'] = float(env_episode_metrics.get('average_positive_charging_duration_min', out.get('average_positive_charging_duration_min', 0.0)))
+    out['total_charging_duration_min'] = float(env_episode_metrics.get('total_charging_duration_min', out.get('total_charging_duration_min', 0.0)))
+    out['mean_requested_charging_duration_min'] = float(env_episode_metrics.get('mean_requested_charging_duration_min', out.get('mean_requested_charging_duration_min', 0.0)))
+    out['mean_executed_charging_duration_min'] = float(env_episode_metrics.get('mean_executed_charging_duration_min', out.get('mean_executed_charging_duration_min', 0.0)))
+    out['mean_requested_action_index'] = float(env_episode_metrics.get('mean_requested_action_index', out.get('mean_requested_action_index', 0.0)))
+    out['mean_executed_action_index'] = float(env_episode_metrics.get('mean_executed_action_index', out.get('mean_executed_action_index', 0.0)))
+    out['charging_event_count'] = float(env_episode_metrics.get('charging_event_count', out.get('charging_event_count', 0.0)))
+    out['zero_charging_event_count'] = float(env_episode_metrics.get('zero_charging_event_count', out.get('zero_charging_event_count', 0.0)))
     out['valid_charging_opportunity_count'] = float(env_episode_metrics.get('valid_charging_opportunity_count', out.get('steps', 0.0)))
     out['episode_length_decisions'] = float(env_episode_metrics.get('episode_length_decisions', out.get('steps', 0.0)))
+    out = add_legacy_metric_aliases(out)
     missing = [k for k in REQUIRED_PAPER_METRICS if k not in out]
     if missing:
         raise KeyError(f"Missing required paper metrics in evaluator output: {missing}")
@@ -142,9 +159,9 @@ def save_eval_metrics(rows: list[dict], out_csv: str):
     p = Path(out_csv); p.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
         raise ValueError('Evaluation produced no rows.')
-    fieldnames = list(dict.fromkeys(k for r in rows for k in r.keys()))
+    fieldnames = list(dict.fromkeys(k for r in rows for k in r.keys() if k not in LEGACY_METRIC_ALIASES))
     for metric in REQUIRED_PAPER_METRICS:
         if metric not in fieldnames:
             fieldnames.append(metric)
     with p.open('w', newline='', encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames); w.writeheader(); w.writerows(rows)
+        w = csv.DictWriter(f, fieldnames=fieldnames); w.writeheader(); w.writerows([{k: v for k, v in r.items() if k in fieldnames} for r in rows])

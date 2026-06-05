@@ -61,8 +61,8 @@ def test_passenger_delay_affected_after_alighting_plus_boarders():
 def test_evaluator_contains_required_metrics():
     out = evaluate_policy(DummyEnv(), DummyPolicy(), episodes=1, max_steps=1)
     required = [
-        "total_cost","total_reward","onboard_passenger_delay","average_excess_dwell_time","total_bus_operating_delay",
-        "parcel_lateness","late_delivery_count","undelivered_parcel_count","average_locker_holding_time",
+        "total_cost","total_reward","onboard_passenger_delay_passenger_min","average_excess_dwell_time_min","total_bus_operating_delay_min",
+        "parcel_lateness_parcel_min","late_delivery_count","undelivered_parcel_count","average_locker_holding_time_min",
         "terminal_undelivered_penalty","minimum_bus_battery","battery_safety_violation_count","total_energy_consumption",
         "station_power_overload_amount","station_power_overload_duration","locker_overflow_amount","locker_overflow_duration",
         "charger_utilization","drone_battery_stockout_count",

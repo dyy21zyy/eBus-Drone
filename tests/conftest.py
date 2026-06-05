@@ -13,6 +13,9 @@ def temp_config(tmp_path: Path) -> Path:
     cfg = copy.deepcopy(cfg)
     cfg['paths']['data_generated'] = str(tmp_path / 'data' / 'generated')
     cfg['paths']['outputs'] = str(tmp_path / 'outputs')
+    cfg.setdefault('rl', {})['train_if_missing_episodes'] = 1
+    cfg.setdefault('rl', {})['benchmark_eval_episodes'] = 1
+    cfg.setdefault('rl', {})['evaluation_episodes'] = 1
     p = tmp_path / 'test_config.yaml'
     try:
         import yaml  # type: ignore
