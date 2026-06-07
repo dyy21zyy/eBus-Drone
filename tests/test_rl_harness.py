@@ -196,7 +196,7 @@ def test_completed_episode_end_time_near_delivery_horizon_minutes():
 
 def test_sensitivity_changes_factor(tmp_path):
     out = tmp_path / 'sens.csv'
-    rows = run_sensitivity(['no_charging'], str(out), env_builder=lambda s, c: EBusDroneEnv(config=c, smoke_test=True), instance_name='small', test_seeds=[1], cfg={'paths': {'outputs': str(tmp_path)}}, factor='passenger_intensity', values=[0.75, 1.25], smoke_test=True)
+    rows = run_sensitivity(['no_charging'], str(out), env_builder=lambda s, c: EBusDroneEnv(config=c, smoke_test=True), instance_name='small', test_seeds=[1], cfg={'paths': {'outputs': str(tmp_path)}, '_sensitivity_hooks': {'regenerate_instance': lambda *_args: None}}, factor='passenger_intensity', values=[0.75, 1.25], smoke_test=True)
     assert {r['sensitivity_value'] for r in rows} == {0.75, 1.25}
     assert all('whether_instance_regenerated' in r for r in rows)
 
@@ -220,20 +220,20 @@ def test_sensitivity_regen_and_offline_rules_and_scenario_consistency(tmp_path):
     cfg = {'paths': {'outputs': str(tmp_path)}, '_sensitivity_hooks': {'regenerate_instance': regen_cb, 'resolve_offline': offline_cb}}
 
     rows_p = run_sensitivity(['no_charging', 'max_feasible'], str(tmp_path / 'p.csv'), env_builder, 'small', [3], cfg, 'passenger_intensity', [0.9], smoke_test=True)
-    assert calls['regen'] == 0 and calls['offline'] == 0
-    assert all(not r['whether_instance_regenerated'] and not r['whether_offline_resolved'] for r in rows_p)
+    assert calls['regen'] == 1 and calls['offline'] == 0
+    assert all(r['whether_instance_regenerated'] and not r['whether_offline_resolved'] for r in rows_p)
     assert len({r['scenario_token'] for r in rows_p}) == 1
 
     rows_n = run_sensitivity(['no_charging'], str(tmp_path / 'n.csv'), env_builder, 'small', [3], cfg, 'num_customers', [1.2], smoke_test=True)
-    assert calls['regen'] == 1 and calls['offline'] == 1
+    assert calls['regen'] == 2 and calls['offline'] == 1
     assert rows_n[0]['whether_instance_regenerated'] and rows_n[0]['whether_offline_resolved']
 
     rows_d = run_sensitivity(['no_charging'], str(tmp_path / 'd.csv'), env_builder, 'small', [3], cfg, 'drones_per_station', [1.1], smoke_test=True)
-    assert calls['offline'] == 2 and rows_d[0]['whether_offline_resolved']
+    assert calls['regen'] == 3 and calls['offline'] == 2 and rows_d[0]['whether_offline_resolved']
 
     rows_pow = run_sensitivity(['no_charging'], str(tmp_path / 'pow.csv'), env_builder, 'small', [4], cfg, 'station_power_capacity', [1600.0], smoke_test=True)
-    assert calls['offline'] == 2
-    assert not rows_pow[0]['whether_offline_resolved'] and not rows_pow[0]['whether_instance_regenerated']
+    assert calls['regen'] == 4 and calls['offline'] == 2
+    assert not rows_pow[0]['whether_offline_resolved'] and rows_pow[0]['whether_instance_regenerated']
     assert any(v == 1600.0 for _s, v in calls['env'])
 
     rows_inf = run_sensitivity(['no_charging'], str(tmp_path / 'inf.csv'), env_builder, 'small', [5], cfg, 'locker_capacity', [0.0], smoke_test=True)
