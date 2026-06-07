@@ -24,6 +24,18 @@ from src.utils.config import load_instance, load_scenario, load_yaml, validate_c
 from src.utils.metrics import REQUIRED_PAPER_METRICS
 from src.utils.random_seed import set_seed
 
+SENSITIVITY_PARAMETER_ALIASES = {
+    "passenger_demand_intensity": "passenger_intensity",
+    "chargers_per_station": "chargers_per_station",
+    "charging_power": "charging_power",
+    "station_power_capacity": "station_power_capacity",
+    "parcel_demand": "num_customers",
+    "trip_freight_capacity": "bus_freight_capacity",
+    "drone_resources": "drones_per_station",
+    "locker_capacity": "locker_capacity",
+    "freight_trip_availability": "freight_trip_availability",
+}
+
 VALID_METHODS = {
     "uniform", "uniform_15", "uniform_30", "uniform_45", "uniform_60", "uniform_120",
     "dwell_based_greedy", "dwell_greedy", "battery_threshold",
@@ -75,27 +87,74 @@ def run_offline(cfg, instance_name: str, seed: int):
     print(f"[offline] instance={instance_name} seed={seed} phase=write_assignment completed path={out}", flush=True)
 
 
+def _read_applied_sensitivity_value(instance: dict, factor: str):
+    stations = instance.get("stations", {}).get("stations", [])
+    station = stations[0] if stations else {}
+    readers = {
+        "passenger_intensity": lambda: instance.get("_sensitivity", {}).get("passenger_intensity"),
+        "num_customers": lambda: len(instance.get("customers", [])),
+        "customer_number": lambda: len(instance.get("customers", [])),
+        "chargers_per_station": lambda: station.get("chargers"),
+        "drones_per_station": lambda: station.get("drones"),
+        "locker_capacity": lambda: station.get("locker_capacity_kg"),
+        "bus_freight_capacity": lambda: instance.get("bus", {}).get("freight_capacity_kg"),
+        "station_unloading_capacity": lambda: instance.get("parcel", {}).get("unloading_capacity_kg_per_stop"),
+        "station_power_capacity": lambda: station.get("station_power_capacity_kw"),
+        "charging_power": lambda: station.get("pantograph_power_kw"),
+        "initial_full_batteries": lambda: station.get("initial_fully_charged_batteries"),
+        "max_charging_duration": lambda: instance.get("charging", {}).get("max_single_stop_seconds"),
+        "freight_trip_availability": lambda: instance.get("network", {}).get("num_freight_carrying_trips"),
+        "parcel_intensity": lambda: instance.get("_sensitivity", {}).get("parcel_intensity"),
+        "base_load_perturbation_intensity": lambda: instance.get("power", {}).get("disturbance_std_kw"),
+    }
+    reader = readers.get(factor)
+    return reader() if reader is not None else None
+
+
 def _sensitivity_hooks(base_cfg: dict):
     def _regen(cfg_mod, instance_name: str, seed: int, factor: str, value: float):
         cfg_file = Path(f"configs/instances/{instance_name}.yaml")
         instance_cfg = load_yaml(str(cfg_file))
-        if factor in {"num_customers", "parcel_intensity"}:
+        if factor in {"num_customers", "customer_number", "parcel_intensity"}:
             baseline = int(instance_cfg.get("num_customers", 0))
-            target = int(round(float(value))) if factor == "num_customers" else int(round(baseline * float(value)))
+            target = int(round(float(value))) if factor in {"num_customers", "customer_number"} else int(round(baseline * float(value)))
             instance_cfg["num_customers"] = max(1, target)
         if factor == "freight_trip_availability":
-            instance_cfg["num_freight_carrying_trips"] = max(0, int(round(float(value))))
+            scheduled = int(instance_cfg.get("num_scheduled_trips", instance_cfg["num_scheduled_bus_trips"]))
+            numeric_value = float(value)
+            target = int(round(scheduled * numeric_value)) if 0.0 <= numeric_value <= 1.0 else int(round(numeric_value))
+            instance_cfg["num_freight_carrying_trips"] = max(0, min(scheduled, target))
+
+        generated_root = Path(cfg_mod["paths"]["data_generated"]) / instance_name
+        instance_path = generated_root / f"instance_seed_{seed}.json"
+        scenario_path = generated_root / f"scenario_0_seed_{seed}.json"
+        # Remove generated data first so a failed generation cannot be confused with
+        # a completed run. Structural factors separately clear their assignment before
+        # re-solving; scenario-only factors intentionally reuse the baseline assignment.
+        for artifact in (instance_path, scenario_path):
+            artifact.unlink(missing_ok=True)
+
         instance = generate_instance(cfg_mod, instance_cfg, seed)
-        if factor == "num_customers" and len(instance.get("customers", [])) != int(instance_cfg["num_customers"]):
+        instance.setdefault("_sensitivity", {})[factor] = value
+        if factor in {"num_customers", "customer_number"} and len(instance.get("customers", [])) != int(instance_cfg["num_customers"]):
             raise ValueError("Sensitivity num_customers failed: generated customer count mismatch.")
-        write_instance(instance, f"{cfg_mod['paths']['data_generated']}/{instance_name}", f"instance_seed_{seed}")
-        write_instance(generate_scenario(cfg_mod, instance, seed, 0), f"{cfg_mod['paths']['data_generated']}/{instance_name}", f"scenario_0_seed_{seed}")
+        write_instance(instance, str(generated_root), f"instance_seed_{seed}")
+        write_instance(generate_scenario(cfg_mod, instance, seed, 0), str(generated_root), f"scenario_0_seed_{seed}")
+        actual = _read_applied_sensitivity_value(instance, factor)
+        if actual is None:
+            section, key = FACTOR_PATHS[factor]
+            actual = cfg_mod.get(section, {}).get(key)
+        return actual
 
     def _resolve(cfg_mod, instance_name: str, seed: int, _factor: str, _value: float):
+        assignment_path = Path(cfg_mod["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
+        assignment_path.unlink(missing_ok=True)
         try:
             run_offline(cfg_mod, instance_name, seed)
             return "resolved"
-        except Exception:
+        except Exception as exc:
+            assignment_path.unlink(missing_ok=True)
+            print(f"[SENSITIVITY] offline_assignment_failed={type(exc).__name__}: {exc}", flush=True)
             return "failed"
 
     return {"regenerate_instance": _regen, "resolve_offline": _resolve}
@@ -129,8 +188,11 @@ def _write_named_summary(source_csv: Path, target_csv: Path):
 def _validate_args(args):
     if args.method and args.methods and args.method != "no_charging":
         raise ValueError("Use either --method or --methods, not both.")
-    if args.mode != "sensitivity" and args.sensitivity:
-        raise ValueError("--sensitivity is only valid for --mode sensitivity.")
+    sensitivity_mode = args.mode == "sensitivity" or (args.mode == "pipeline" and args.experiment == "sensitivity")
+    if not sensitivity_mode and (args.sensitivity or args.parameter or args.values):
+        raise ValueError("Sensitivity arguments require --mode sensitivity or --mode pipeline --experiment sensitivity.")
+    if sensitivity_mode and not args.values:
+        raise ValueError("Sensitivity experiments require at least one value in --values.")
     if args.sensitivity and args.sensitivity not in FACTOR_PATHS:
         raise ValueError(f"Unknown sensitivity variable: {args.sensitivity}")
     methods_to_validate = list(args.methods or []) + ([args.method] if args.method else [])
@@ -407,24 +469,13 @@ def main():
     args = ap.parse_args()
     if args.smoke_test:
         args.smoke = True
-    _validate_args(args)
     if args.parameter and args.sensitivity:
         raise ValueError("Use either --parameter or --sensitivity, not both.")
     if args.parameter:
-        alias = {
-            "passenger_demand_intensity": "passenger_intensity",
-            "chargers_per_station": "chargers_per_station",
-            "charging_power": "charging_power",
-            "station_power_capacity": "station_power_capacity",
-            "parcel_demand": "num_customers",
-            "trip_freight_capacity": "bus_freight_capacity",
-            "drone_resources": "drones_per_station",
-            "locker_capacity": "locker_capacity",
-            "freight_trip_availability": "freight_trip_availability",
-        }
-        if args.parameter not in alias:
+        if args.parameter not in SENSITIVITY_PARAMETER_ALIASES:
             raise ValueError(f"Unknown --parameter: {args.parameter}")
-        args.sensitivity = alias[args.parameter]
+        args.sensitivity = SENSITIVITY_PARAMETER_ALIASES[args.parameter]
+    _validate_args(args)
     cfg = load_yaml(args.config)
     validate_config(cfg)
     if args.output_dir:
@@ -500,6 +551,7 @@ def main():
             raise ValueError("Formal experiments require full horizon with --max-steps unset. Use --allow-truncated-for-testing to override for tests.")
         if args.mode in ('benchmark', 'ablation', 'sensitivity') and not args.allow_truncated_for_testing:
             _run_formal_preflight(plan, args, cfg)
+        pipeline_sensitivity = args.mode == 'pipeline' and args.experiment == 'sensitivity'
         if args.mode == 'pipeline':
             for i in plan['instances']:
                 for s in plan['seeds']:
@@ -507,7 +559,7 @@ def main():
                     run_generate(cfg, i, s)
                     print(f"[pipeline] instance={i} seed={s} phase=offline started", flush=True)
                     run_offline(cfg, i, s)
-        if args.mode in ('benchmark', 'pipeline'):
+        if args.mode == 'benchmark' or (args.mode == 'pipeline' and not pipeline_sensitivity):
             for i in plan['instances']:
                 out = Path(cfg['paths']['outputs']) / 'results' / (args.experiment or 'benchmark') / i / 'summary.csv'
                 if out.exists() and not args.overwrite:
@@ -531,15 +583,36 @@ def main():
                 out = Path(cfg['paths']['outputs']) / 'results' / 'ablation' / i / 'summary.csv'
                 run_ablation(str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
                 _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "ablation_summary.csv")
-        if args.mode == 'sensitivity':
-            vals = args.values or [1.0]
+        if args.mode == 'sensitivity' or pipeline_sensitivity:
+            vals = args.values
             cfg['_sensitivity_hooks'] = _sensitivity_hooks(cfg)
             factors = [args.sensitivity] if args.sensitivity else list(FACTOR_PATHS.keys())
+            all_summary_rows = []
             for i in plan['instances']:
+                instance_rows = []
+                sensitivity_dir = Path(cfg['paths']['outputs']) / 'results' / 'sensitivity' / i
+                summary_out = sensitivity_dir / 'summary.csv'
+                if summary_out.exists() and not args.overwrite:
+                    raise FileExistsError(f"Output exists and overwrite is disabled: {summary_out}")
                 for factor in factors:
-                    out = Path(cfg['paths']['outputs']) / 'results' / 'sensitivity' / i / f'{factor}.csv'
-                    run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=factor, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
-                    _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "sensitivity_summary.csv")
+                    out = sensitivity_dir / f'{factor}.csv'
+                    rows = run_sensitivity(
+                        plan['methods'],
+                        str(out),
+                        env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke),
+                        instance_name=i,
+                        test_seeds=plan['seeds'],
+                        cfg=cfg,
+                        factor=factor,
+                        values=vals,
+                        smoke_test=args.smoke,
+                        train_if_missing=args.train_if_missing,
+                        sensitivity_parameter=args.parameter or factor,
+                    )
+                    instance_rows.extend(rows)
+                save_eval_metrics(instance_rows, str(summary_out))
+                all_summary_rows.extend(instance_rows)
+            save_eval_metrics(all_summary_rows, str(Path(cfg['paths']['outputs']) / "results" / "sensitivity_summary.csv"))
         return
     if args.mode == 'export_tables':
         _export_tables(Path(cfg['paths']['outputs']), args.experiment or 'benchmark', include_smoke=bool(args.include_smoke))
